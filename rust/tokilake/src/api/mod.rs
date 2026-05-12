@@ -41,9 +41,9 @@ pub fn router(state: AppState) -> Router {
     // ComfyUI routes — protected by Bearer token auth
     let comfyui_routes = Router::new()
         .route("/workflows", get(comfyui_workflows_list))
-        .route("/workflows/:id", get(comfyui_workflow_get))
-        .route("/workflows/:id/run", post(comfyui_workflow_run))
-        .route("/tasks/:id", get(comfyui_task_get))
+        .route("/workflows/{id}", get(comfyui_workflow_get))
+        .route("/workflows/{id}/run", post(comfyui_workflow_run))
+        .route("/tasks/{id}", get(comfyui_task_get))
         .route("/prompt", post(comfyui_prompt))
         .route("/view", get(comfyui_view))
         .route("/queue", get(comfyui_queue_get))
