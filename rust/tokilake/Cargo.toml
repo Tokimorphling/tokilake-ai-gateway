@@ -1,6 +1,6 @@
 [package]
 name = "tokilake"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tokilake - High-performance tunnel and gateway ecosystem"
 readme = "README.md"
 edition.workspace = true
