@@ -239,7 +239,7 @@ func (r *MemoryWorkerRegistry) RegisterWorker(_ context.Context, session *tokila
 		Models:    register.Models,
 		LastSeen:  time.Now(),
 	}
-	r.manager.BindChannel(session, wid, wid, register.Group, register.Models, register.BackendType, 1)
+	r.manager.BindChannel(session, wid, wid, register.Group, register.Models, register.BackendType, 1, register.ConcurrencyLimit)
 	logger.SysLog(fmt.Sprintf("worker registered: id=%d namespace=%s models=%v", wid, namespace, register.Models))
 
 	return &tokilake.RegisterResult{

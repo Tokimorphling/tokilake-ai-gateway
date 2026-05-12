@@ -141,6 +141,18 @@ type ResponsesInterface interface {
 	CreateResponsesStream(request *types.OpenAIResponsesRequest) (requester.StreamReaderInterface[string], *types.OpenAIErrorWithStatusCode)
 }
 
+type ComfyUIInterface interface {
+	ProviderInterface
+	ListComfyUIWorkflows() (*http.Response, *types.OpenAIErrorWithStatusCode)
+	GetComfyUIWorkflow(workflowID string) (*http.Response, *types.OpenAIErrorWithStatusCode)
+	RunComfyUIWorkflow(workflowID string, params map[string]any) (*http.Response, *types.OpenAIErrorWithStatusCode)
+	GetComfyUITask(taskID string) (*http.Response, *types.OpenAIErrorWithStatusCode)
+	CreateComfyUIPrompt(request map[string]any) (*http.Response, *types.OpenAIErrorWithStatusCode)
+	GetComfyUIView(filename, subfolder, fileType string) (*http.Response, *types.OpenAIErrorWithStatusCode)
+	GetComfyUIQueue() (*http.Response, *types.OpenAIErrorWithStatusCode)
+	InterruptComfyUI() (*http.Response, *types.OpenAIErrorWithStatusCode)
+}
+
 type VideoInterface interface {
 	ProviderInterface
 	CreateVideo(request *types.VideoRequest) (*types.VideoTaskObject, *types.OpenAIErrorWithStatusCode)

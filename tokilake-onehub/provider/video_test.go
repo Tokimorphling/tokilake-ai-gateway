@@ -225,7 +225,7 @@ func setupVideoTunnelSession(t *testing.T, manager *tokilakesvc.SessionManager, 
 		Tunnel:    tokilakesvc.NewSMuxTunnelSession(clientSession),
 	}
 	require.NoError(t, manager.ClaimNamespace(session, session.Namespace))
-	manager.BindChannel(session, 1, channelID, "default", []string{"video-model"}, "openai", 1)
+	manager.BindChannel(session, 1, channelID, "default", []string{"video-model"}, "openai", 1, 0)
 
 	go func() {
 		for {

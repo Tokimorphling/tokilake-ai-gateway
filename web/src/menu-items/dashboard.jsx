@@ -5,7 +5,8 @@ const icons = {
   IconChartHistogram: () => <Icon width={20} icon="solar:chart-2-bold-duotone" />,
   IconBallFootball: () => <Icon width={20} icon="solar:chat-round-line-bold-duotone" />,
   IconSystemInfo: () => <Icon width={20} icon="solar:code-scan-bold" />,
-  IconList: () => <Icon width={20} icon="solar:checklist-minimalistic-bold-duotone" />
+  IconList: () => <Icon width={20} icon="solar:checklist-minimalistic-bold-duotone" />,
+  IconComfyUI: () => <Icon width={20} icon="solar:pallete-2-bold-duotone" />
 };
 
 const dashboard = {
@@ -46,6 +47,14 @@ const dashboard = {
       type: 'item',
       url: '/panel/playground',
       icon: icons.IconBallFootball,
+      breadcrumbs: false
+    },
+    {
+      id: 'comfyui',
+      title: 'ComfyUI',
+      type: 'item',
+      url: '/panel/comfyui',
+      icon: icons.IconComfyUI,
       breadcrumbs: false
     },
     {

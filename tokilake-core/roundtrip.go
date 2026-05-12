@@ -47,8 +47,13 @@ func (g *Gateway) doTunnelRequestWithSession(ctx context.Context, session *Gatew
 		return nil, "", fmt.Errorf("tunnel request is nil")
 	}
 
+	if !session.TryAcquireRequest() {
+		return nil, "", fmt.Errorf("concurrency limit exceeded")
+	}
+
 	stream, err := session.Tunnel.OpenStream(ctx)
 	if err != nil {
+		session.ReleaseRequest()
 		return nil, "", fmt.Errorf("open tokiame stream: %w", err)
 	}
 
@@ -83,6 +88,7 @@ func (g *Gateway) doTunnelRequestWithSession(ctx context.Context, session *Gatew
 			close(completed)
 			cancel()
 			g.Manager.RemoveRequest(requestID)
+			session.ReleaseRequest()
 		})
 	}
 

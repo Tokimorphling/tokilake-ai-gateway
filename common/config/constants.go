@@ -333,6 +333,7 @@ const (
 	RelayModeKling
 	RelayModeResponses
 	RelayModeVideos
+	RelayModeComfyUI
 )
 
 type ContextKey string

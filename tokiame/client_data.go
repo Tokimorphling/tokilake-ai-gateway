@@ -62,6 +62,12 @@ func (c *Client) handleDataStream(ctx context.Context, stream tokilake.TunnelStr
 	c.info("<<< received tunnel request request_id=%s route_kind=%s method=%s path=%s model=%s is_stream=%v",
 		request.RequestID, request.RouteKind, request.Method, request.Path, request.Model, request.IsStream)
 
+	// ComfyUI workflow routes are handled by the local workflow manager, not proxied.
+	if isComfyUIRouteKind(request.RouteKind) {
+		c.handleComfyUIRequest(ctx, codec, request)
+		return
+	}
+
 	target, err := c.resolveModelTarget(request.Model)
 	if err != nil {
 		c.warn("<<< resolve model target failed request_id=%s model=%s err=%v", request.RequestID, request.Model, err)

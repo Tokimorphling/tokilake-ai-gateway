@@ -24,6 +24,14 @@ const (
 	TunnelRouteKindVideosCreate       = "videos_create"
 	TunnelRouteKindVideosGet          = "videos_get"
 	TunnelRouteKindVideosContent      = "videos_content"
+	TunnelRouteKindComfyUIPrompt        = "comfyui_prompt"
+	TunnelRouteKindComfyUIWorkflowsList = "comfyui_workflows_list"
+	TunnelRouteKindComfyUIWorkflowGet   = "comfyui_workflow_get"
+	TunnelRouteKindComfyUIWorkflowRun   = "comfyui_workflow_run"
+	TunnelRouteKindComfyUITaskGet       = "comfyui_task_get"
+	TunnelRouteKindComfyUIView          = "comfyui_view"
+	TunnelRouteKindComfyUIQueueGet      = "comfyui_queue_get"
+	TunnelRouteKindComfyUIInterrupt     = "comfyui_interrupt"
 )
 
 type TunnelRequest struct {

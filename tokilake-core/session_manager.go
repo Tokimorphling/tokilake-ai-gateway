@@ -20,25 +20,49 @@ type InFlightRequest struct {
 }
 
 type GatewaySession struct {
-	ID          uint64
-	Token       *Token
-	TokenKey    string
-	RemoteAddr  string
-	ConnectedAt time.Time
-	WorkerID    int
-	ChannelID   int
-	Namespace   string
-	Group       string
-	BackendType string
-	Models      []string
-	Status      int
-	Transport   string
-	Tunnel      TunnelSession
-	Control     TunnelStream
+	ID            uint64
+	Token         *Token
+	TokenKey      string
+	RemoteAddr    string
+	ConnectedAt   time.Time
+	WorkerID      int
+	ChannelID     int
+	Namespace     string
+	Group         string
+	BackendType   string
+	Models        []string
+	Status        int
+	Transport     string
+	Tunnel        TunnelSession
+	Control       TunnelStream
 	Authenticated bool
+
+	ConcurrencyLimit int
+	activeRequests   atomic.Int32
 
 	ControlCodec *ControlCodec
 	closeOnce    sync.Once
+}
+
+func (s *GatewaySession) TryAcquireRequest() bool {
+	if s.ConcurrencyLimit <= 0 {
+		return true
+	}
+	for {
+		current := s.activeRequests.Load()
+		if current >= int32(s.ConcurrencyLimit) {
+			return false
+		}
+		if s.activeRequests.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
+}
+
+func (s *GatewaySession) ReleaseRequest() {
+	if s.ConcurrencyLimit > 0 {
+		s.activeRequests.Add(-1)
+	}
 }
 
 func (s *GatewaySession) Close() error {
@@ -95,7 +119,7 @@ func (m *SessionManager) ClaimNamespace(session *GatewaySession, namespace strin
 	return nil
 }
 
-func (m *SessionManager) BindChannel(session *GatewaySession, workerID int, channelID int, group string, models []string, backendType string, status int) {
+func (m *SessionManager) BindChannel(session *GatewaySession, workerID int, channelID int, group string, models []string, backendType string, status int, concurrencyLimit int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -108,6 +132,7 @@ func (m *SessionManager) BindChannel(session *GatewaySession, workerID int, chan
 	session.Models = append([]string(nil), models...)
 	session.BackendType = backendType
 	session.Status = status
+	session.ConcurrencyLimit = concurrencyLimit
 	m.byChannelID[channelID] = session
 }
 

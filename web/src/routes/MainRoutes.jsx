@@ -28,6 +28,7 @@ const PrivateGroups = Loadable(lazy(() => import('views/PrivateGroups')));
 const Invoice = Loadable(lazy(() => import('views/Invoice')));
 const InvoiceDetail = Loadable(lazy(() => import('views/Invoice/detail')));
 const MultiUserStats = Loadable(lazy(() => import('views/MultiUserStats')));
+const ComfyUI = Loadable(lazy(() => import('views/ComfyUI')));
 // dashboard routing
 const Dashboard = Loadable(lazy(() => import('views/Dashboard')));
 
@@ -150,6 +151,10 @@ const MainRoutes = {
     {
       path: 'system_info',
       element: <SystemInfo />
+    },
+    {
+      path: 'comfyui',
+      element: <ComfyUI />
     }
   ]
 };

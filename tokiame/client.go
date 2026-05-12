@@ -69,12 +69,17 @@ type ClientConfig struct {
 	HeartbeatIntervalSeconds int                          `json:"heartbeat_interval_seconds,omitempty"`
 	ReconnectDelaySeconds    int                          `json:"reconnect_delay_seconds,omitempty"`
 	InsecureSkipVerify       bool                         `json:"insecure_skip_verify,omitempty"`
+	ConcurrencyLimit         int                          `json:"concurrency_limit,omitempty"`
+	ComfyUIWorkflowsDir      string                       `json:"comfyui_workflows_dir,omitempty"`
+	S3                       *S3Config                    `json:"s3,omitempty"`
 }
 
 type Client struct {
-	config *ClientConfig
-	dialer *websocket.Dialer
-	logger *slog.Logger
+	config     *ClientConfig
+	dialer     *websocket.Dialer
+	logger     *slog.Logger
+	comfyuiMgr *ComfyUIWorkflowManager
+	s3         *S3Uploader
 
 	requestMu      sync.Mutex
 	requestCancels map[string]context.CancelFunc
@@ -129,6 +134,28 @@ func LoadClientConfigFromEnv() (*ClientConfig, error) {
 	}
 	if reconnect, ok := parsePositiveEnvInt("TOKIAME_RECONNECT_DELAY_SECONDS"); ok {
 		config.ReconnectDelaySeconds = reconnect
+	}
+	if limit, ok := parsePositiveEnvInt("TOKIAME_CONCURRENCY_LIMIT"); ok {
+		config.ConcurrencyLimit = limit
+	}
+
+	overrideStringEnv(&config.ComfyUIWorkflowsDir, "TOKIAME_COMFYUI_WORKFLOWS_DIR")
+
+	// S3 configuration
+	if config.S3 == nil {
+		s3Endpoint := strings.TrimSpace(os.Getenv("TOKIAME_S3_ENDPOINT"))
+		if s3Endpoint != "" {
+			config.S3 = &S3Config{}
+		}
+	}
+	if config.S3 != nil {
+		overrideStringEnv(&config.S3.Endpoint, "TOKIAME_S3_ENDPOINT")
+		overrideStringEnv(&config.S3.BucketName, "TOKIAME_S3_BUCKET_NAME")
+		overrideStringEnv(&config.S3.AccessKeyID, "TOKIAME_S3_ACCESS_KEY_ID")
+		overrideStringEnv(&config.S3.AccessKeySecret, "TOKIAME_S3_ACCESS_KEY_SECRET")
+		overrideStringEnv(&config.S3.Region, "TOKIAME_S3_REGION")
+		overrideStringEnv(&config.S3.PublicBaseURL, "TOKIAME_S3_PUBLIC_BASE_URL")
+		overrideStringEnv(&config.S3.PathPrefix, "TOKIAME_S3_PATH_PREFIX")
 	}
 
 	modelTargetsRaw := strings.TrimSpace(os.Getenv("TOKIAME_MODEL_TARGETS"))
@@ -225,6 +252,16 @@ func (c *ClientConfig) ControlPlaneBackendType() string {
 }
 
 func NewClient(config *ClientConfig) *Client {
+	var comfyuiMgr *ComfyUIWorkflowManager
+	if config.ComfyUIWorkflowsDir != "" {
+		comfyuiMgr = NewComfyUIWorkflowManager(config.ComfyUIWorkflowsDir)
+	}
+
+	var s3Uploader *S3Uploader
+	if config.S3 != nil {
+		s3Uploader = NewS3Uploader(*config.S3)
+	}
+
 	return &Client{
 		config: config,
 		dialer: &websocket.Dialer{
@@ -235,6 +272,8 @@ func NewClient(config *ClientConfig) *Client {
 			"namespace", config.Namespace,
 			"node_name", firstNonEmptyString(config.NodeName, config.Namespace),
 		),
+		comfyuiMgr:     comfyuiMgr,
+		s3:             s3Uploader,
 		requestCancels: make(map[string]context.CancelFunc),
 		targetKeyNext:  make(map[string]int),
 	}
@@ -431,12 +470,13 @@ func (c *Client) register(codec *tokilake.ControlCodec, controlStream readDeadli
 		Type:      tokilake.ControlMessageTypeRegister,
 		RequestID: requestID,
 		Register: &tokilake.RegisterMessage{
-			Namespace:    c.config.Namespace,
-			NodeName:     c.config.NodeName,
-			Group:        c.config.Group,
-			Models:       c.config.ModelNames(),
-			HardwareInfo: collectHardwareInfo(c.config),
-			BackendType:  c.config.ControlPlaneBackendType(),
+			Namespace:        c.config.Namespace,
+			NodeName:         c.config.NodeName,
+			Group:            c.config.Group,
+			Models:           c.config.ModelNames(),
+			HardwareInfo:     collectHardwareInfo(c.config),
+			BackendType:      c.config.ControlPlaneBackendType(),
+			ConcurrencyLimit: c.config.ConcurrencyLimit,
 		},
 	}
 	c.debug(">>> sending register request_id=%s namespace=%s node_name=%s group=%s models=%v backend_type=%s",
@@ -455,10 +495,11 @@ func (c *Client) syncModels(codec *tokilake.ControlCodec, controlStream readDead
 		Type:      tokilake.ControlMessageTypeModelsSync,
 		RequestID: requestID,
 		ModelsSync: &tokilake.ModelsSyncMessage{
-			Group:        c.config.Group,
-			Models:       c.config.ModelNames(),
-			HardwareInfo: collectHardwareInfo(c.config),
-			BackendType:  c.config.ControlPlaneBackendType(),
+			Group:            c.config.Group,
+			Models:           c.config.ModelNames(),
+			HardwareInfo:     collectHardwareInfo(c.config),
+			BackendType:      c.config.ControlPlaneBackendType(),
+			ConcurrencyLimit: c.config.ConcurrencyLimit,
 		},
 	}
 	c.debug(">>> sending models_sync request_id=%s namespace=%s models=%v",
@@ -573,9 +614,10 @@ func (c *Client) heartbeatLoop(ctx context.Context, codec *tokilake.ControlCodec
 				Type:      tokilake.ControlMessageTypeHeartbeat,
 				RequestID: c.nextRequestID("heartbeat"),
 				Heartbeat: &tokilake.HeartbeatMessage{
-					NodeName:      c.config.NodeName,
-					HardwareInfo:  collectHardwareInfo(c.config),
-					CurrentModels: c.config.ModelNames(),
+					NodeName:         c.config.NodeName,
+					HardwareInfo:     collectHardwareInfo(c.config),
+					CurrentModels:    c.config.ModelNames(),
+					ConcurrencyLimit: c.config.ConcurrencyLimit,
 				},
 			}
 			c.debug(">>> sending heartbeat request_id=%s node_name=%s models=%v",

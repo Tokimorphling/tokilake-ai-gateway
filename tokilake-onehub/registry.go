@@ -49,7 +49,7 @@ func (r *HubWorkerRegistry) RegisterWorker(ctx context.Context, session *tokilak
 		return nil, err
 	}
 
-	r.Manager.BindChannel(session, result.WorkerID, result.ChannelID, result.Group, result.Models, result.BackendType, result.Status)
+	r.Manager.BindChannel(session, result.WorkerID, result.ChannelID, result.Group, result.Models, result.BackendType, result.Status, register.ConcurrencyLimit)
 	model.ChannelGroup.Load()
 	model.GlobalUserGroupRatio.Load()
 	return result, nil
@@ -101,6 +101,9 @@ func (r *HubWorkerRegistry) UpdateHeartbeat(ctx context.Context, session *tokila
 	}
 
 	session.Status = status
+	if heartbeat.ConcurrencyLimit > 0 {
+		session.ConcurrencyLimit = heartbeat.ConcurrencyLimit
+	}
 	if modelsChanged {
 		session.Models = models
 	}
@@ -165,6 +168,9 @@ func (r *HubWorkerRegistry) SyncModels(ctx context.Context, session *tokilake.Ga
 		session.Models = models
 		session.Group = group
 		session.BackendType = backendType
+		if modelsSync.ConcurrencyLimit > 0 {
+			session.ConcurrencyLimit = modelsSync.ConcurrencyLimit
+		}
 		return nil
 	})
 	if err == nil {

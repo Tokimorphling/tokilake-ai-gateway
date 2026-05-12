@@ -21,6 +21,7 @@ func SetRelayRouter(router *gin.Engine) {
 	setGeminiRouter(router)
 	setRecraftRouter(router)
 	setKlingRouter(router)
+	setComfyUIRouter(router)
 }
 
 func setOpenAIRouter(router *gin.Engine) {
@@ -149,5 +150,20 @@ func setKlingRouter(router *gin.Engine) {
 	relayKlingRouter.Use(middleware.DynamicRedisRateLimiter())
 	{
 		relayKlingRouter.POST("/v1/:class/:action", task.RelayTaskSubmit)
+	}
+}
+
+func setComfyUIRouter(router *gin.Engine) {
+	relayComfyUIRouter := router.Group("/v1/comfyui")
+	relayComfyUIRouter.Use(middleware.RelayPanicRecover(), middleware.OpenaiAuth(), middleware.Distribute(), middleware.DynamicRedisRateLimiter())
+	{
+		relayComfyUIRouter.GET("/workflows", relay.RelayComfyUIWorkflowsList)
+		relayComfyUIRouter.GET("/workflows/:id", relay.RelayComfyUIWorkflowGet)
+		relayComfyUIRouter.POST("/workflows/:id/run", relay.RelayComfyUIWorkflowRun)
+		relayComfyUIRouter.GET("/tasks/:id", relay.RelayComfyUITaskGet)
+		relayComfyUIRouter.POST("/prompt", relay.RelayComfyUIPrompt)
+		relayComfyUIRouter.GET("/view", relay.RelayComfyUIView)
+		relayComfyUIRouter.GET("/queue", relay.RelayComfyUIQueueGet)
+		relayComfyUIRouter.POST("/interrupt", relay.RelayComfyUIInterrupt)
 	}
 }

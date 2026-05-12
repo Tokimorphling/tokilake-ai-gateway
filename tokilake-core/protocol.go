@@ -36,26 +36,29 @@ type AuthMessage struct {
 }
 
 type RegisterMessage struct {
-	Namespace    string         `json:"namespace"`
-	NodeName     string         `json:"node_name,omitempty"`
-	Group        string         `json:"group,omitempty"`
-	Models       []string       `json:"models,omitempty"`
-	HardwareInfo map[string]any `json:"hardware_info,omitempty"`
-	BackendType  string         `json:"backend_type,omitempty"`
+	Namespace        string         `json:"namespace"`
+	NodeName         string         `json:"node_name,omitempty"`
+	Group            string         `json:"group,omitempty"`
+	Models           []string       `json:"models,omitempty"`
+	HardwareInfo     map[string]any `json:"hardware_info,omitempty"`
+	BackendType      string         `json:"backend_type,omitempty"`
+	ConcurrencyLimit int            `json:"concurrency_limit,omitempty"`
 }
 
 type HeartbeatMessage struct {
-	Status        int            `json:"status,omitempty"`
-	NodeName      string         `json:"node_name,omitempty"`
-	HardwareInfo  map[string]any `json:"hardware_info,omitempty"`
-	CurrentModels []string       `json:"current_models,omitempty"`
+	Status           int            `json:"status,omitempty"`
+	NodeName         string         `json:"node_name,omitempty"`
+	HardwareInfo     map[string]any `json:"hardware_info,omitempty"`
+	CurrentModels    []string       `json:"current_models,omitempty"`
+	ConcurrencyLimit int            `json:"concurrency_limit,omitempty"`
 }
 
 type ModelsSyncMessage struct {
-	Group        string         `json:"group,omitempty"`
-	Models       []string       `json:"models,omitempty"`
-	HardwareInfo map[string]any `json:"hardware_info,omitempty"`
-	BackendType  string         `json:"backend_type,omitempty"`
+	Group            string         `json:"group,omitempty"`
+	Models           []string       `json:"models,omitempty"`
+	HardwareInfo     map[string]any `json:"hardware_info,omitempty"`
+	BackendType      string         `json:"backend_type,omitempty"`
+	ConcurrencyLimit int            `json:"concurrency_limit,omitempty"`
 }
 
 type CancelRequestMessage struct {
