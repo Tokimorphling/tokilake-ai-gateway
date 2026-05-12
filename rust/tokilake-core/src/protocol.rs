@@ -65,6 +65,27 @@ pub mod control_type {
 
 pub mod route_kind {
     pub const CHAT_COMPLETIONS: &str = "chat_completions";
+    pub const COMPLETIONS: &str = "completions";
+    pub const RESPONSES: &str = "responses";
+    pub const EMBEDDINGS: &str = "embeddings";
+    pub const RERANK: &str = "rerank";
+    pub const AUDIO_SPEECH: &str = "audio_speech";
+    pub const AUDIO_TRANSCRIPTION: &str = "audio_transcription";
+    pub const AUDIO_TRANSLATION: &str = "audio_translation";
+    pub const IMAGES_GENERATIONS: &str = "images_generations";
+    pub const IMAGES_EDITS: &str = "images_edits";
+    pub const IMAGES_VARIATIONS: &str = "images_variations";
+    pub const VIDEOS_CREATE: &str = "videos_create";
+    pub const VIDEOS_GET: &str = "videos_get";
+    pub const VIDEOS_CONTENT: &str = "videos_content";
+    pub const COMFYUI_PROMPT: &str = "comfyui_prompt";
+    pub const COMFYUI_WORKFLOWS_LIST: &str = "comfyui_workflows_list";
+    pub const COMFYUI_WORKFLOW_GET: &str = "comfyui_workflow_get";
+    pub const COMFYUI_WORKFLOW_RUN: &str = "comfyui_workflow_run";
+    pub const COMFYUI_TASK_GET: &str = "comfyui_task_get";
+    pub const COMFYUI_VIEW: &str = "comfyui_view";
+    pub const COMFYUI_QUEUE_GET: &str = "comfyui_queue_get";
+    pub const COMFYUI_INTERRUPT: &str = "comfyui_interrupt";
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -126,41 +147,47 @@ pub struct AuthMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterMessage {
-    pub namespace:     String,
+    pub namespace:         String,
     #[serde(default)]
-    pub node_name:     String,
+    pub node_name:         String,
     #[serde(default)]
-    pub group:         String,
+    pub group:             String,
     #[serde(default)]
-    pub models:        Vec<String>,
+    pub models:            Vec<String>,
     #[serde(default)]
-    pub hardware_info: HashMap<String, serde_json::Value>,
+    pub hardware_info:     HashMap<String, serde_json::Value>,
     #[serde(default)]
-    pub backend_type:  String,
+    pub backend_type:      String,
+    #[serde(default)]
+    pub concurrency_limit: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatMessage {
     #[serde(default)]
-    pub status:         i32,
+    pub status:            i32,
     #[serde(default)]
-    pub node_name:      String,
+    pub node_name:         String,
     #[serde(default)]
-    pub hardware_info:  HashMap<String, serde_json::Value>,
+    pub hardware_info:     HashMap<String, serde_json::Value>,
     #[serde(default)]
-    pub current_models: Vec<String>,
+    pub current_models:    Vec<String>,
+    #[serde(default)]
+    pub concurrency_limit: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelsSyncMessage {
     #[serde(default)]
-    pub group:         String,
+    pub group:             String,
     #[serde(default)]
-    pub models:        Vec<String>,
+    pub models:            Vec<String>,
     #[serde(default)]
-    pub hardware_info: HashMap<String, serde_json::Value>,
+    pub hardware_info:     HashMap<String, serde_json::Value>,
     #[serde(default)]
-    pub backend_type:  String,
+    pub backend_type:      String,
+    #[serde(default)]
+    pub concurrency_limit: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

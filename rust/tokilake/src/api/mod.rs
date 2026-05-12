@@ -36,12 +36,65 @@ pub struct AppState {
 // ---------------------------------------------------------------------------
 
 pub fn router(state: AppState) -> Router {
+    let shared = Arc::new(state);
+
+    // ComfyUI routes — protected by Bearer token auth
+    let comfyui_routes = Router::new()
+        .route("/workflows", get(comfyui_workflows_list))
+        .route("/workflows/:id", get(comfyui_workflow_get))
+        .route("/workflows/:id/run", post(comfyui_workflow_run))
+        .route("/tasks/:id", get(comfyui_task_get))
+        .route("/prompt", post(comfyui_prompt))
+        .route("/view", get(comfyui_view))
+        .route("/queue", get(comfyui_queue_get))
+        .route("/interrupt", post(comfyui_interrupt))
+        .layer(axum::middleware::from_fn_with_state(
+            shared.clone(),
+            bearer_auth_middleware,
+        ))
+        .with_state(shared.clone());
+
     Router::new()
         .route("/health", get(health))
         .route("/connect", get(ws_handler))
         .route("/api/tokilake/connect", get(ws_handler))
         .route("/v1/chat/completions", post(chat_completions))
-        .with_state(Arc::new(state))
+        .nest("/v1/comfyui", comfyui_routes)
+        .with_state(shared)
+}
+
+/// Middleware that validates Bearer token from Authorization header or query parameter.
+async fn bearer_auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> impl IntoResponse {
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| {
+            let s = s.trim();
+            if s.to_lowercase().starts_with("bearer ") {
+                s[7..].trim()
+            } else {
+                s
+            }
+        })
+        .unwrap_or("");
+
+    let token = token.strip_prefix("sk-").unwrap_or(token);
+    let expected = state.token.strip_prefix("sk-").unwrap_or(&state.token);
+
+    if token.is_empty() || token != expected {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized: invalid or missing token"})),
+        )
+            .into_response();
+    }
+
+    next.run(req).await.into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -729,4 +782,330 @@ async fn relay_response(
     let mut response = (headers, body).into_response();
     *response.status_mut() = status_code;
     response
+}
+
+// ---------------------------------------------------------------------------
+// ComfyUI endpoints — tunnel routing
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ComfyUIQuery {
+    model:     Option<String>,
+    namespace: Option<String>,
+}
+
+/// Resolve namespace and model from query params + optional JSON body.
+fn resolve_comfyui_model_namespace(
+    query: &ComfyUIQuery,
+    body: Option<&serde_json::Value>,
+) -> (String, String) {
+    let model = query
+        .model
+        .clone()
+        .or_else(|| body.and_then(|b| b.get("model").and_then(|v| v.as_str()).map(String::from)))
+        .unwrap_or_else(|| "default".into());
+    let namespace = query
+        .namespace
+        .clone()
+        .unwrap_or_else(|| "test-worker".into());
+    (model, namespace)
+}
+
+/// Open a tunnel stream, send a TunnelRequest, and relay the response.
+async fn tunnel_forward(
+    state: &AppState,
+    namespace: &str,
+    tunnel_req: TunnelRequest,
+) -> axum::response::Response {
+    let session = match state.session_manager.get_by_namespace(namespace) {
+        Some(s) => s,
+        None => {
+            return gateway_error(
+                StatusCode::BAD_GATEWAY,
+                &format!("namespace '{namespace}' is offline"),
+            );
+        }
+    };
+
+    let (tunnel, session_id, channel_id) = {
+        let g = session.read().await;
+        match &g.tunnel_session {
+            Some(t) => (
+                Arc::clone(t),
+                g.id,
+                g.worker_info.as_ref().map_or(0, |i| i.channel_id),
+            ),
+            None => {
+                return gateway_error(
+                    StatusCode::BAD_GATEWAY,
+                    &format!("namespace '{namespace}' has no tunnel"),
+                );
+            }
+        }
+    };
+
+    let request_id = tunnel_req.request_id.clone();
+
+    state.session_manager.track_request(InFlightRequest {
+        request_id: request_id.as_str().into(),
+        session_id,
+        namespace: namespace.into(),
+        channel_id,
+        created_at: std::time::Instant::now(),
+    });
+
+    let mut req_data = serde_json::to_vec(&tunnel_req).unwrap();
+    req_data.push(b'\n');
+
+    let mut stream = match tunnel.lock().await.open().await {
+        Some(s) => s,
+        None => {
+            state.session_manager.remove_request(&request_id);
+            return gateway_error(StatusCode::BAD_GATEWAY, "failed to open data stream");
+        }
+    };
+
+    if let Err(e) = stream.write_all(&req_data).await {
+        state.session_manager.remove_request(&request_id);
+        return gateway_error(
+            StatusCode::BAD_GATEWAY,
+            &format!("failed to send request: {e}"),
+        );
+    }
+
+    relay_response(stream, &request_id, &state.session_manager).await
+}
+
+async fn comfyui_prompt(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    let bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            return gateway_error(
+                StatusCode::BAD_REQUEST,
+                &format!("failed to read body: {e}"),
+            );
+        }
+    };
+
+    let body_json: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return gateway_error(StatusCode::BAD_REQUEST, &format!("invalid JSON: {e}")),
+    };
+
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, Some(&body_json));
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_PROMPT.into(),
+        method: "POST".into(),
+        path: "/prompt".into(),
+        model,
+        headers: HashMap::from([("Content-Type".into(), "application/json".into())]),
+        is_stream: false,
+        body: bytes.to_vec(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_workflows_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+) -> impl IntoResponse {
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, None);
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_WORKFLOWS_LIST.into(),
+        method: "GET".into(),
+        path: "/comfyui/workflows".into(),
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_workflow_get(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+    axum::extract::Path(workflow_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, None);
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_WORKFLOW_GET.into(),
+        method: "GET".into(),
+        path: format!("/comfyui/workflows/{workflow_id}"),
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_workflow_run(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+    axum::extract::Path(workflow_id): axum::extract::Path<String>,
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    let bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            return gateway_error(
+                StatusCode::BAD_REQUEST,
+                &format!("failed to read body: {e}"),
+            );
+        }
+    };
+
+    let body_json: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return gateway_error(StatusCode::BAD_REQUEST, &format!("invalid JSON: {e}")),
+    };
+
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, Some(&body_json));
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_WORKFLOW_RUN.into(),
+        method: "POST".into(),
+        path: format!("/comfyui/workflows/{workflow_id}/run"),
+        model,
+        headers: HashMap::from([("Content-Type".into(), "application/json".into())]),
+        is_stream: false,
+        body: bytes.to_vec(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_task_get(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+    axum::extract::Path(task_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, None);
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_TASK_GET.into(),
+        method: "GET".into(),
+        path: format!("/comfyui/tasks/{task_id}"),
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+#[derive(Deserialize)]
+struct ComfyUIViewQuery {
+    model:     Option<String>,
+    namespace: Option<String>,
+    filename:  Option<String>,
+    subfolder: Option<String>,
+    #[serde(rename = "type")]
+    file_type: Option<String>,
+}
+
+async fn comfyui_view(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIViewQuery>,
+) -> impl IntoResponse {
+    let filename = match &query.filename {
+        Some(f) if !f.is_empty() => f.clone(),
+        _ => return gateway_error(StatusCode::BAD_REQUEST, "filename is required"),
+    };
+
+    let model = query.model.clone().unwrap_or_else(|| "default".into());
+    let namespace = query
+        .namespace
+        .clone()
+        .unwrap_or_else(|| "test-worker".into());
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let mut path = format!("/view?filename={filename}");
+    if let Some(ref sf) = query.subfolder {
+        if !sf.is_empty() {
+            path.push_str(&format!("&subfolder={sf}"));
+        }
+    }
+    if let Some(ref ft) = query.file_type {
+        if !ft.is_empty() {
+            path.push_str(&format!("&type={ft}"));
+        }
+    }
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_VIEW.into(),
+        method: "GET".into(),
+        path,
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_queue_get(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+) -> impl IntoResponse {
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, None);
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_QUEUE_GET.into(),
+        method: "GET".into(),
+        path: "/queue".into(),
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
+}
+
+async fn comfyui_interrupt(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ComfyUIQuery>,
+) -> impl IntoResponse {
+    let (model, namespace) = resolve_comfyui_model_namespace(&query, None);
+    let request_id = format!("{namespace}:comfyui:{}", uuid::Uuid::new_v4());
+
+    let tunnel_req = TunnelRequest {
+        request_id,
+        route_kind: route_kind::COMFYUI_INTERRUPT.into(),
+        method: "POST".into(),
+        path: "/interrupt".into(),
+        model,
+        headers: HashMap::new(),
+        is_stream: false,
+        body: Vec::new(),
+    };
+
+    tunnel_forward(&state, &namespace, tunnel_req).await
 }
