@@ -1,62 +1,71 @@
 //! Route service — resolves the requested model to a Channel.
-//!
-//! Sits in the middle of the stack. Receives a raw HTTP request from the
-//! AuthService above, extracts the `model` field from the JSON body (or path),
-//! looks up a matching Channel, and passes a `GatewayRequest` down to the
-//! UpstreamService below.
 
-use super::{AuthedRequest, ChannelInfo, GatewayRequest};
-use bytes::Bytes;
-use http::Response;
-use http_body_util::Full;
+use super::{AuthedRequest, ChannelIndex, ChannelInfo, GatewayRequest};
+use http::{Request, Response, StatusCode};
+use http_body_util::BodyExt;
 use service_async::{
     MakeService, Service,
     layer::{FactoryLayer, layer_fn},
 };
+use std::sync::Arc;
 
-/// Routing service: maps model → channel, then delegates to inner.
 pub struct RouteService<T> {
     pub inner: T,
+    pub index: Arc<ChannelIndex>,
 }
 
 impl<T> Service<AuthedRequest> for RouteService<T>
 where
-    T: Service<GatewayRequest, Response = Response<Full<Bytes>>, Error = anyhow::Error>,
+    T: Service<GatewayRequest, Response = Response<axum::body::Body>, Error = anyhow::Error>,
 {
-    type Response = Response<Full<Bytes>>;
+    type Response = Response<axum::body::Body>;
     type Error = anyhow::Error;
 
     async fn call(&self, req: AuthedRequest) -> Result<Self::Response, Self::Error> {
-        // Extract model from the URI path, e.g. /v1/chat/completions → use a
-        // default model, or parse the JSON body.
-        // For now, use a simple path-based heuristic.
-        let model = "default".to_string();
+        let (parts, body) = req.inner.into_parts();
+        let bytes = body.collect().await?.to_bytes();
 
-        // TODO: look up from Toasty DB.  For now, use a stub channel.
-        let channel = ChannelInfo {
-            name:     "stub".into(),
-            provider: "openai".into(),
-            base_url: Some("https://api.openai.com".into()),
-            api_key:  Some("sk-stub".into()),
-            models:   "gpt-4,gpt-3.5-turbo".into(),
-            weight:   1,
+        let model = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
+            .unwrap_or_else(|| "default".into());
+
+        let Some(ch) = self.index.select(&req.token_group, &model) else {
+            return Ok(model_not_found(&model));
         };
 
+        let (mapped_model, _) = ch.map_model(&model);
+
         let gw_req = GatewayRequest {
-            inner: req.inner,
-            token_name: req.token_name,
-            model,
-            channel,
+            inner:   Request::from_parts(parts, axum::body::Body::from(bytes)),
+            model:   mapped_model,
+            channel: ChannelInfo::from(&ch),
         };
 
         self.inner.call(gw_req).await
     }
 }
 
+fn model_not_found(model: &str) -> Response<axum::body::Body> {
+    let body = serde_json::json!({
+        "error": {
+            "message": format!("No available channel found for model: {model}"),
+            "type": "invalid_request_error",
+            "code": "model_not_found",
+        }
+    });
+    Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap()
+}
+
 // -- Factory / Layer ----------------------------------------------------------
 
 pub struct RouteServiceFactory<T> {
     inner: T,
+    index: Arc<ChannelIndex>,
 }
 
 impl<T: MakeService> MakeService for RouteServiceFactory<T> {
@@ -66,12 +75,19 @@ impl<T: MakeService> MakeService for RouteServiceFactory<T> {
     fn make_via_ref(&self, old: Option<&Self::Service>) -> Result<Self::Service, Self::Error> {
         Ok(RouteService {
             inner: self.inner.make_via_ref(old.map(|o| &o.inner))?,
+            index: Arc::clone(&self.index),
         })
     }
 }
 
 impl<T> RouteService<T> {
-    pub fn layer<C>() -> impl FactoryLayer<C, T, Factory = RouteServiceFactory<T>> {
-        layer_fn(|_c: &C, inner| RouteServiceFactory { inner })
+    pub fn layer()
+    -> impl FactoryLayer<crate::gateway::GatewayConfig, T, Factory = RouteServiceFactory<T>> {
+        layer_fn(
+            |c: &crate::gateway::GatewayConfig, inner| RouteServiceFactory {
+                inner,
+                index: Arc::clone(&c.index),
+            },
+        )
     }
 }

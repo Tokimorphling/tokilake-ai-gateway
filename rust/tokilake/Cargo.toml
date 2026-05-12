@@ -17,10 +17,19 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 tracing = { workspace = true }
-axum = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true, features = ["ws"] }
 hyper = "1.0"
 hyper-util = { version = "0.1", features = ["full"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
 http = "1.0"
 http-body-util = "0.1"
 service-async = "0.2"
 tokilake-core = { workspace = true }
+tokilake-smux = { workspace = true }
+futures-util.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+dashmap.workspace = true
+thiserror.workspace = true

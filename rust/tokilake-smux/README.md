@@ -1,38 +1,43 @@
 # tokilake-smux
 
-A wire-compatible smux protocol implementation in Rust, optimized for high performance and zero overhead.
+A high-performance smux protocol implementation in Rust, optimized for zero overhead and concurrent multiplexing.
+
+[![Crates.io](https://img.shields.io/crates/v/tokilake-smux)](https://crates.io/crates/tokilake-smux)
+[![License](https://img.shields.io/crates/l/tokilake-smux)](LICENSE)
+
+## Repository
+
+**GitHub**: https://github.com/anomalyco/tokilake/tree/main/rust/tokilake-smux
 
 ## Overview
 
-This crate provides a Rust implementation of the smux protocol, originally popularized by [xtaci/smux](https://github.com/xtaci/smux) in Go. It is designed to work seamlessly within the `tokilake` ecosystem and other high-concurrency Rust network applications.
+`tokilake-smux` provides a Rust implementation of the smux protocol, designed for seamless integration within the `tokilake` ecosystem and other high-concurrency Rust network applications.
 
 ### Key Features
 
-- **Zero-overhead Design**: Generic over transport layers (`AsyncRead + AsyncWrite`) without requiring dynamic dispatch (`Box<dyn>`).
-- **No `async_trait`**: Utilizes modern Rust's `impl Future` in traits for maximum performance.
-- **Protocol Compatible**: Fully wire-compatible with the original Go implementations (v1).
-- **Concurrent Mutliplexing**: Channel-based internal stream multiplexing via `tokio`.
+- **Zero-overhead Design**: Generic over transport layers (`AsyncRead + AsyncWrite`) without dynamic dispatch (`Box<dyn>`)
+- **No `async_trait`**: Uses modern Rust's `impl Future` in traits for maximum performance
+- **Protocol Compatible**: Fully wire-compatible with Go implementations (v1)
+- **Concurrent Multiplexing**: Channel-based internal stream multiplexing via `tokio`
 
 ## Usage
 
 ```rust
 use tokilake_smux::{Session, Config};
-use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let stream = TcpStream::connect("127.0.0.1:8080").await?;
+    let stream = tokio::net::TcpStream::connect("127.0.0.1:8080").await?;
     
-    // Initialize a client-side multiplexed session
+    // Client-side multiplexed session
     let mut session = Session::client(stream, Config::default());
     
-    // Open a logical stream over the single TCP connection
+    // Open logical streams over single TCP connection
     let mut stream1 = session.open().await.unwrap();
     let mut stream2 = session.open().await.unwrap();
-
+    
     // Use streams like standard tokio AsyncRead/AsyncWrite
-    // ...
-
+    
     Ok(())
 }
 ```
@@ -40,12 +45,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Protocol Details
 
 The protocol uses an 8-byte little-endian header format:
-```text
+```
 | VERSION (1B) | CMD (1B) | LENGTH (2B) | STREAM_ID (4B) |
 ```
 
-Commands supported: `SYN(0)`, `FIN(1)`, `PSH(2)`, `NOP(3)`.
+Commands: `SYN(0)`, `FIN(1)`, `PSH(2)`, `NOP(3)`
+
+## Dependencies
+
+- `tokio` (full features)
+- `futures-util`
+- `bytes`
+- `serde` (derive)
+- `tracing`
 
 ## License
 
-MIT License.
+MIT License - see [LICENSE](LICENSE)

@@ -34,6 +34,9 @@ futures-util = "0.3"
 parking_lot = "0.12"
 dashmap = "6"
 
+# Random
+rand = "0.9"
+
 # HTTP server
 axum = { version = "0.8.9", features = ["ws"] }
 
@@ -44,8 +47,8 @@ rustls-pemfile = "2.1"
 rcgen = "0.13"
 
 # Internal crates
-tokilake-core = { version = "0.1.0", path = "tokilake-core" }
-tokilake-smux = { version = "0.1.0", path = "tokilake-smux" }
+tokilake-core = { version = "0.1.1", path = "tokilake-core" }
+tokilake-smux = { version = "0.1.1", path = "tokilake-smux" }
 
 [profile.release-lto]
 inherits = "release"

@@ -1,6 +1,6 @@
 [package]
 name = "tokilake-smux"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tokilake SMUX - Wire-compatible smux protocol, zero-overhead Rust implementation"
 readme = "README.md"
 edition.workspace = true

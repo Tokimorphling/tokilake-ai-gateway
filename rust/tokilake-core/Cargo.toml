@@ -1,6 +1,6 @@
 [package]
 name = "tokilake-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tokilake Core - High-performance tunnel gateway core library"
 readme = "README.md"
 edition.workspace = true
